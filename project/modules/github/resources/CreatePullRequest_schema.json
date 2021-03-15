@@ -1,0 +1,1 @@
+{"ballerinax/github:0.99.12:CreatePullRequest":{"title":"string","head":"string","base":"string","body":"string","maintainer_can_modify":"boolean","draft":"boolean","issue":"int"}}

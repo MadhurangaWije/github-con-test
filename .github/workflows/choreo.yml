@@ -1,0 +1,148 @@
+name: choreo-userapps
+on:
+  repository_dispatch:
+    types: [deploy, undeploy, redeploy]
+jobs:
+  cicd:
+    env:
+      NAMESPACE: ${{ github.event.client_payload.choreo.ns }}
+      RELEASE: ${{ github.event.client_payload.choreo.fqAppName }}
+      CHOREO_ORG: ${{ github.event.client_payload.choreo.Org }}
+      CHOREO_APP: ${{ github.event.client_payload.choreo.App }}
+      CHOREO_FQ_APP: ${{ github.event.client_payload.choreo.fqAppName }}
+      APP_ID: ${{ github.event.client_payload.choreo.appId }}
+      ENV_ID: ${{ github.event.client_payload.choreo.envId }}
+      CONTAINER_REGISTRY: ${{ github.event.client_payload.choreo.containerRegistry }}
+      HELM_TEMPLATE_REPO: ${{ github.event.client_payload.choreo.helmRepo }}
+      INGRESS_HOST: ${{ github.event.client_payload.choreo.hostname }}
+      K8S_SVC: ${{ github.event.client_payload.choreo.fqAppName }}
+      INGRESS_CLASS: ${{ github.event.client_payload.choreo.ingressClass }}
+      TLS_SECRET: ${{ github.event.client_payload.choreo.tlsSecret }}
+      CRON_SCHEDULE: ${{ github.event.client_payload.choreo.cronSchedule }}
+      APP_SECRET: ${{ github.event.client_payload.choreo.appObsSecret }}
+      # tag based on last git commit sha
+      TAG: ${{ github.sha }}
+      HELM_VALUE_CONTENT: ${{ github.event.client_payload.choreo.helmValueContent }}
+      BAL_CONFIG_TOML_CONTENT: ${{ github.event.client_payload.choreo.balConfigTomlContent }}
+
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Start-Deploy
+      if: github.event.action == 'deploy' || github.event.action == 'redeploy'
+      run: echo 'starting deploy/redeploy run'
+
+    - name: Start-Undeploy
+      if: github.event.action == 'undeploy'
+      run: echo 'starting undeploy run'
+
+    - name: Checkout
+      if: github.event.action == 'deploy'
+      uses: actions/checkout@v2
+
+    - name: Docker-Login
+      if: github.event.action == 'deploy'
+      uses: azure/docker-login@v1
+      with:
+        login-server: ${{ env.CONTAINER_REGISTRY }}
+        username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
+        password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+
+    - name: Build
+      if: github.event.action == 'deploy'
+      run: |
+        docker build . --file Dockerfile --tag ${{ env.CONTAINER_REGISTRY }}/${{ env.CHOREO_FQ_APP }}:${{ env.TAG }}
+        docker push ${{ env.CONTAINER_REGISTRY }}/${{ env.CHOREO_FQ_APP }}:${{ env.TAG }}
+
+    - name: K8s-Context
+      uses: Azure/k8s-set-context@v1
+      with:
+        method: service-account
+        k8s-url: ${{ secrets.K8S_API_SERVER_URL }}
+        k8s-secret: ${{ secrets.K8S_SERVICE_ACCOUNT }}
+
+    - name: Setup Helm
+      uses: azure/setup-helm@v1
+      with:
+        version: 'v3.2.4'
+        
+#    - name: Create registry pull secret for AKS
+#      if: github.event.action == 'deploy' || github.event.action == 'redeploy'
+#      uses: Azure/k8s-create-secret@v1
+#      with:
+#        container-registry-url: ${{ env.CONTAINER_REGISTRY }}
+#        container-registry-username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
+#        container-registry-password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+#        secret-name: gitactionapp-registry-secret
+    - name: Helm-Template-Checkout
+      if: github.event.action == 'deploy' || github.event.action == 'redeploy'
+      uses: actions/checkout@v2
+      with:
+        token: ${{ secrets.HELM_TEMPLATE_REPO_TOKEN }}
+        repository: ${{ env.HELM_TEMPLATE_REPO }}
+        path: helm
+
+#    - name: Helm-Template-Render
+#      if: github.event.action == 'deploy' || github.event.action == 'redeploy'
+#      uses: azure/k8s-bake@v1
+#      id: bake
+#      with:
+#        renderEngine: 'helm'
+#        helmChart: './helm/chart/'
+#        releaseName: ${{ env.RELEASE }}
+#        overrides: |
+#          appName:${{ env.CHOREO_FQ_APP }}
+#          image:${{ env.CONTAINER_REGISTRY }}/${{ env.CHOREO_FQ_APP }}:${{ env.TAG }}
+#          hostname:${{ env.INGRESS_HOST }}
+#          serviceName:${{ env.K8S_SVC }}
+#          ingressClass:${{ env.INGRESS_CLASS }}
+#          tlsSecret:${{ env.TLS_SECRET }}
+#          choreoOrg:${{ env.CHOREO_ORG_NAME }}
+#          choreoApp:${{ env.CHOREO_CHOREO_FQ_APP }}
+#          appId:${{ env.APP_ID }}
+#        helm-version: 'latest'
+#
+#    - name: Deploy
+#      if: github.event.action == 'deploy' || github.event.action == 'redeploy'
+#      uses: Azure/k8s-deploy@v1
+#      timeout-minutes: 2
+#      with:
+#        namespace: ${{ env.NAMESPACE }}
+#        manifests: ${{ steps.bake.outputs.manifestsBundle }}
+#        imagepullsecrets: gitactionapp-registry-secret
+
+    - name: Deploy
+      if: github.event.action == 'deploy' || github.event.action == 'redeploy'
+      run: |
+        export HELM_DRIVER=configmap
+        echo ${HELM_VALUE_CONTENT} | base64 -d > values.yaml
+        echo ${BAL_CONFIG_TOML_CONTENT} | base64 -d > ./helm/chart/files/Config.toml
+        helm upgrade --install \
+        --set appName=${{ env.CHOREO_FQ_APP }} \
+        --set org=${{ env.CHOREO_ORG }} \
+        --set app=${{ env.CHOREO_APP }} \
+        --set image=${{ env.CONTAINER_REGISTRY }}/${{ env.CHOREO_FQ_APP }}:${{ env.TAG }} \
+        --set hostname=${{ env.INGRESS_HOST }} \
+        --set serviceName=${{ env.K8S_SVC }} \
+        --set serviceName=${{ env.K8S_SVC }} \
+        --set ingressClass=${{ env.INGRESS_CLASS }} \
+        --set tlsSecret=${{ env.TLS_SECRET }} \
+        --set appId=${{ env.APP_ID }} \
+        --set envId=${{ env.ENV_ID }} \
+        --set schedule="${{ env.CRON_SCHEDULE }}" \
+        --set appSecret="${{ env.APP_SECRET }}" \
+        --values values.yaml \
+        ${{ env.CHOREO_FQ_APP }} ./helm/chart/ \
+        --atomic --wait --timeout 120s -n ${{ env.NAMESPACE }}
+
+#    - name: Undeploy
+#      if: github.event.action == 'undeploy'
+#      run: kubectl delete deployments,services,ingresses,jobs,cronjobs -l app=${{ env.CHOREO_FQ_APP }} -n ${{ env.NAMESPACE }}
+    - name: Undeploy
+      if: github.event.action == 'undeploy'
+      run: |
+        export HELM_DRIVER=configmap
+        helm uninstall ${{ env.CHOREO_FQ_APP }} -n ${{ env.NAMESPACE }}
+
+    - name: End
+      run: echo 'ending pipeline run'

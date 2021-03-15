@@ -1,0 +1,1 @@
+{"ballerinax/github:0.99.12:PullRequestReviewComment":{"url":"string","pull_request_review_id":"int","id":"int","position":"int","original_position":"int","user":"ballerinax/github:0.99.12:Creator","body":"string","created_at":"string","updated_at":"string","html_url":"string","pull_request_url":"string","line":"int","original_line":"int","side":"string"}}
